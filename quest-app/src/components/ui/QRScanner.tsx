@@ -10,6 +10,8 @@ interface QRScannerProps {
   isActive: boolean;
   preferredCamera?: string;
   fullView?: boolean;
+  qrbox?: number;
+  fps?: number;
 }
 
 export default function QRScanner({
@@ -27,11 +29,12 @@ export default function QRScanner({
   useEffect(() => {
     if (!isActive || !containerRef.current) return;
 
+    const container = containerRef.current; // Store ref value
     const videoElem = document.createElement('video');
     videoElem.style.width = '100%';
     videoElem.style.height = '100%';
     videoRef.current = videoElem;
-    containerRef.current.appendChild(videoElem);
+    container.appendChild(videoElem);
 
     const scanner = new QrScanner(
       videoElem,
@@ -69,8 +72,8 @@ export default function QRScanner({
         scannerRef.current = null;
       }
 
-      if (videoRef.current && containerRef.current?.contains(videoRef.current)) {
-        containerRef.current.removeChild(videoRef.current);
+      if (videoRef.current && container?.contains(videoRef.current)) {
+        container.removeChild(videoRef.current);
       }
     };
   }, [isActive, preferredCamera, onScanSuccess, onScanError, onScannerInit]);
