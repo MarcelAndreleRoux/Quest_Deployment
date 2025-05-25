@@ -2,7 +2,7 @@ import { useAuth } from "react-oidc-context";
 
 export function useAuthState() {
     const auth = useAuth();
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://quest-deployment.vercel.app/";
 
     const signOutRedirect = () => {
         auth.removeUser();
