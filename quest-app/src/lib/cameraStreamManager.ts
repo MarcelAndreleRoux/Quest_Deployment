@@ -15,6 +15,6 @@ export function releaseCameraStream() {
   usageCount = Math.max(usageCount - 1, 0);
   if (usageCount === 0 && stream) {
     stream.getTracks().forEach(track => track.stop());
-    stream = null;
+    stream = null;
   }
 }
