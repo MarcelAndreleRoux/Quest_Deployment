@@ -28,6 +28,8 @@ export default function QRScanner({
   const scanner = useRef<Html5Qrcode | null>(null);
   const isCleaningUp = useRef(false);
   const [isInitializing, setIsInitializing] = useState(false);
+  // Generate a unique scannerId for this component instance
+  const scannerId = 'qr-scanner-container';
 
   useEffect(() => {
     if (!isActive || !qrRef.current || isInitializing || isCleaningUp.current) return;
@@ -43,11 +45,7 @@ export default function QRScanner({
             if (state === Html5QrcodeScannerState.SCANNING || 
                 state === Html5QrcodeScannerState.PAUSED) {
               if (scanner.current) {
-                if (scanner.current) {
-                  if (scanner.current) {
-                    await scanner.current.stop();
-                  }
-                }
+                await scanner.current.stop();
               }
             }
           } catch (stopError) {
@@ -63,10 +61,25 @@ export default function QRScanner({
           scanner.current = null;
         }
 
-        // Give a small delay for cleanup
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Ensure the element exists and has the correct ID
+        if (!qrRef.current) {
+          throw new Error('QR scanner container not found');
+        }
 
-        scanner.current = new Html5Qrcode('qr-scanner');
+        // Give a small delay for cleanup and DOM updates
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        // Double-check the element still exists after delay
+        if (!qrRef.current) {
+          throw new Error('QR scanner container removed during initialization');
+        }
+
+        // Verify the element is in the DOM
+        if (!document.getElementById(scannerId)) {
+          throw new Error(`HTML Element with id=${scannerId} not found`);
+        }
+
+        scanner.current = new Html5Qrcode(scannerId);
 
         const config: Html5QrcodeCameraScanConfig = {
           fps: Math.min(fps, 15), // Conservative FPS for Samsung devices
@@ -119,8 +132,8 @@ export default function QRScanner({
         let userFriendlyMessage = errorMessage;
         if (errorMessage.includes('Permission') || errorMessage.includes('NotAllowedError')) {
           userFriendlyMessage = 'Camera permission denied. Please allow camera access and refresh the page.';
-        } else if (errorMessage.includes('NotFoundError')) {
-          userFriendlyMessage = 'No camera found. Please ensure your device has a camera.';
+        } else if (errorMessage.includes('NotFoundError') || errorMessage.includes('not found')) {
+          userFriendlyMessage = 'Scanner initialization failed. Please refresh the page and try again.';
         } else if (errorMessage.includes('NotSupportedError')) {
           userFriendlyMessage = 'Camera not supported in this browser. Please try Chrome or Safari.';
         }
@@ -132,9 +145,12 @@ export default function QRScanner({
       }
     };
 
-    initScanner();
-
+    // Add a small delay before initializing to ensure DOM is ready
+    const timer = setTimeout(initScanner, 100);
+    
     return () => {
+      clearTimeout(timer);
+      
       if (scanner.current && !isCleaningUp.current) {
         isCleaningUp.current = true;
         
@@ -144,9 +160,9 @@ export default function QRScanner({
             const state = scanner.current?.getState();
             if (state === Html5QrcodeScannerState.SCANNING || 
                 state === Html5QrcodeScannerState.PAUSED) {
-                if (scanner.current) {
-                  await scanner.current.stop();
-                }
+              if (scanner.current) {
+                await scanner.current.stop();
+              }
             }
           } catch (stopError) {
             // Expected if scanner is not running
@@ -167,16 +183,16 @@ export default function QRScanner({
         cleanup();
       }
     };
-  }, [isActive, fps, qrbox, preferredCamera, onScanSuccess, onScanError, onScannerInit]);
+  }, [isActive, fps, qrbox, preferredCamera, onScanSuccess, onScanError, onScannerInit, scannerId]);
 
   return (
     <div
-      id="qr-scanner"
+      id={scannerId}
       ref={qrRef}
       className={`relative ${fullView ? 'w-full h-full' : 'w-[300px] h-[300px]'} overflow-hidden rounded-lg bg-black`}
     >
       {isInitializing && (
-        <div className="absolute inset-0 flex items-center justify-center text-white">
+        <div className="absolute inset-0 flex items-center justify-center text-white z-10">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
             <p>Initializing camera...</p>
