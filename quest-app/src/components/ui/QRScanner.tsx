@@ -43,14 +43,16 @@ export default function QRScanner({
         if (state === Html5QrcodeScannerState.SCANNING || 
             state === Html5QrcodeScannerState.PAUSED) {
           await scanner.current.stop();
+          // Wait longer after stopping to prevent transition errors
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
       } catch (stopError) {
         console.debug('Scanner stop error (expected if not running):', stopError);
+        // Even if stop fails, wait before proceeding
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
       
       try {
-        // Wait a bit before clearing to avoid DOM manipulation issues
-        await new Promise(resolve => setTimeout(resolve, 100));
         if (scanner.current) {
           scanner.current.clear();
         }
@@ -84,7 +86,7 @@ export default function QRScanner({
         await safeCleanup();
 
         // Wait for cleanup and DOM updates
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 800));
 
         // Verify we should still proceed
         if (currentAttempt !== initializationAttempt.current || !isActive) {
@@ -99,6 +101,9 @@ export default function QRScanner({
         // Set the ID on the element
         qrRef.current.id = scannerId;
 
+        // Wait a bit more before creating new scanner
+        await new Promise(resolve => setTimeout(resolve, 200));
+
         scanner.current = new Html5Qrcode(scannerId);
 
         const config: Html5QrcodeCameraScanConfig = {
@@ -110,16 +115,12 @@ export default function QRScanner({
 
         // Define camera constraint options in order of preference
         const cameraOptions = [
-          // Option 1: Exact environment facing mode
-          { facingMode: 'environment' },
-          // Option 2: Ideal environment facing mode (fallback)
-          { facingMode: { ideal: 'environment' } },
-          // Option 3: Any back camera
-          { facingMode: { exact: 'environment' } },
-          // Option 4: User camera fallback
-          { facingMode: 'user' },
-          // Option 5: Any available camera
-          undefined
+          // Option 1: Any available camera (most compatible)
+          '',
+          // Option 2: User facing camera
+          'user',
+          // Option 3: Environment facing camera (if available)
+          'environment'
         ];
 
         let scannerStarted = false;
@@ -132,10 +133,15 @@ export default function QRScanner({
           }
 
           try {
-            console.log(`Trying camera option ${i + 1}:`, cameraOptions[i]);
+            console.log(`Trying camera option ${i + 1}:`, cameraOptions[i] || 'any camera');
             
+            let cameraConstraint: string | MediaTrackConstraints = cameraOptions[i];
+            // If cameraConstraint is 'user' or 'environment', use facingMode, else use as cameraId (empty string for any camera)
+            if (cameraConstraint === 'user' || cameraConstraint === 'environment') {
+              cameraConstraint = { facingMode: cameraConstraint };
+            }
             await scanner.current!.start(
-              cameraOptions[i] || { facingMode: preferredCamera },
+              cameraConstraint,
               config,
               (decodedText, decodedResult) => {
                 console.log('QR Code scanned:', decodedText);
@@ -158,17 +164,13 @@ export default function QRScanner({
             lastError = cameraError as Error;
             console.warn(`Camera option ${i + 1} failed:`, cameraError);
             
-            // If scanner was partially initialized, clean it up before trying next option
-            if (scanner.current) {
-              try {
-                const state = scanner.current.getState();
-                if (state === Html5QrcodeScannerState.SCANNING || 
-                    state === Html5QrcodeScannerState.PAUSED) {
-                  await scanner.current.stop();
-                }
-              } catch (stopError) {
-                console.debug('Stop error during fallback:', stopError);
-              }
+            // Wait before trying next option to prevent transition errors
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Check if the error is a transition error, if so, wait longer
+            if (cameraError instanceof Error && cameraError.message.includes('transition')) {
+              console.log('Waiting for scanner state to settle...');
+              await new Promise(resolve => setTimeout(resolve, 1000));
             }
           }
         }

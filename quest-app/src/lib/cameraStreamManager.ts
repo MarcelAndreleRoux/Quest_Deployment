@@ -37,24 +37,18 @@ export async function getCameraStream(): Promise<MediaStream> {
 
       // Try multiple constraint configurations in order of preference
       const constraintOptions: MediaStreamConstraints[] = [
-        // Option 1: Environment facing camera with ideal settings
+        // Option 1: Basic video only (most compatible)
+        {
+          video: true
+        },
+        // Option 2: Simple constraints
         {
           video: {
-            facingMode: 'environment',
-            width: { ideal: 1280, max: 1920 },
-            height: { ideal: 720, max: 1080 },
-            frameRate: { ideal: 30, max: 60 }
+            width: { ideal: 640 },
+            height: { ideal: 480 }
           }
         },
-        // Option 2: Any back camera with relaxed constraints
-        {
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 640, max: 1280 },
-            height: { ideal: 480, max: 720 }
-          }
-        },
-        // Option 3: Front camera fallback
+        // Option 3: Try user camera (front)
         {
           video: {
             facingMode: 'user',
@@ -62,16 +56,13 @@ export async function getCameraStream(): Promise<MediaStream> {
             height: { ideal: 480 }
           }
         },
-        // Option 4: Any camera with minimal constraints
+        // Option 4: Try environment camera if available
         {
           video: {
+            facingMode: { ideal: 'environment' },
             width: { ideal: 640 },
             height: { ideal: 480 }
           }
-        },
-        // Option 5: Basic video constraint only
-        {
-          video: true
         }
       ];
 
