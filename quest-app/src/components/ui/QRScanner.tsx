@@ -19,26 +19,47 @@ export default function QRScanner({
   onScanError,
   onScannerInit,
   isActive,
-  fps = 15,
+  fps = 10,
   qrbox,
   preferredCamera = 'environment',
   fullView = false,
 }: QRScannerProps) {
   const qrRef = useRef<HTMLDivElement>(null);
   const scanner = useRef<Html5Qrcode | null>(null);
+  const isCleaningUp = useRef(false);
   const [isInitializing, setIsInitializing] = useState(false);
 
   useEffect(() => {
-    if (!isActive || !qrRef.current || isInitializing) return;
+    if (!isActive || !qrRef.current || isInitializing || isCleaningUp.current) return;
 
     const initScanner = async () => {
       setIsInitializing(true);
       
       try {
-        // Clean up any existing scanner first
+        // Clean up any existing scanner first with proper state checking
         if (scanner.current) {
-          await scanner.current.stop().catch(() => {});
-          scanner.current.clear();
+          try {
+            const state = scanner.current.getState();
+            if (state === Html5QrcodeScannerState.SCANNING || 
+                state === Html5QrcodeScannerState.PAUSED) {
+              if (scanner.current) {
+                if (scanner.current) {
+                  if (scanner.current) {
+                    await scanner.current.stop();
+                  }
+                }
+              }
+            }
+          } catch (stopError) {
+            console.debug('Scanner stop error (expected if not running):', stopError);
+          }
+          
+          try {
+            scanner.current.clear();
+          } catch (clearError) {
+            console.debug('Scanner clear error:', clearError);
+          }
+          
           scanner.current = null;
         }
 
@@ -48,9 +69,8 @@ export default function QRScanner({
         scanner.current = new Html5Qrcode('qr-scanner');
 
         const config: Html5QrcodeCameraScanConfig = {
-          fps: Math.min(fps, 15), // Limit FPS for Samsung devices
+          fps: Math.min(fps, 15), // Conservative FPS for Samsung devices
           qrbox: qrbox ?? undefined,
-          // Samsung-friendly settings
           aspectRatio: 1.0,
           disableFlip: false,
         };
@@ -65,8 +85,8 @@ export default function QRScanner({
               onScanSuccess(decodedText, decodedResult);
             },
             (errorMessage) => {
-              // Only log decode errors if they're frequent
-              if (Math.random() < 0.01) { // Log 1% of decode errors
+              // Only log decode errors occasionally to avoid spam
+              if (Math.random() < 0.01) {
                 console.debug('QR decode error:', errorMessage);
               }
             }
@@ -97,12 +117,12 @@ export default function QRScanner({
         
         // Provide more specific error messages for common Samsung issues
         let userFriendlyMessage = errorMessage;
-        if (errorMessage.includes('Permission')) {
+        if (errorMessage.includes('Permission') || errorMessage.includes('NotAllowedError')) {
           userFriendlyMessage = 'Camera permission denied. Please allow camera access and refresh the page.';
         } else if (errorMessage.includes('NotFoundError')) {
           userFriendlyMessage = 'No camera found. Please ensure your device has a camera.';
-        } else if (errorMessage.includes('NotAllowedError')) {
-          userFriendlyMessage = 'Camera access blocked. Please check your browser settings.';
+        } else if (errorMessage.includes('NotSupportedError')) {
+          userFriendlyMessage = 'Camera not supported in this browser. Please try Chrome or Safari.';
         }
         
         onScannerInit(false);
@@ -115,17 +135,36 @@ export default function QRScanner({
     initScanner();
 
     return () => {
-      if (scanner.current) {
-        scanner.current
-          .stop()
-          .then(() => {
+      if (scanner.current && !isCleaningUp.current) {
+        isCleaningUp.current = true;
+        
+        // Safe cleanup with state checking
+        const cleanup = async () => {
+          try {
+            const state = scanner.current?.getState();
+            if (state === Html5QrcodeScannerState.SCANNING || 
+                state === Html5QrcodeScannerState.PAUSED) {
+                if (scanner.current) {
+                  await scanner.current.stop();
+                }
+            }
+          } catch (stopError) {
+            // Expected if scanner is not running
+            console.debug('Cleanup stop error (expected):', stopError);
+          }
+          
+          try {
             scanner.current?.clear();
-            scanner.current = null;
-            console.log('QR Scanner cleaned up');
-          })
-          .catch((e) => {
-            console.error('Error stopping QR scanner:', e);
-          });
+          } catch (clearError) {
+            console.debug('Cleanup clear error:', clearError);
+          }
+          
+          scanner.current = null;
+          isCleaningUp.current = false;
+          console.log('QR Scanner cleaned up');
+        };
+        
+        cleanup();
       }
     };
   }, [isActive, fps, qrbox, preferredCamera, onScanSuccess, onScanError, onScannerInit]);
