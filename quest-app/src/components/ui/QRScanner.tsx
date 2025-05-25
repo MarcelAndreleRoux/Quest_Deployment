@@ -1,15 +1,13 @@
 'use client';
 
-import { Html5Qrcode, Html5QrcodeScannerState, Html5QrcodeCameraScanConfig } from 'html5-qrcode';
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
+import QrScanner from 'qr-scanner';
 
 interface QRScannerProps {
   onScanSuccess: (decodedText: string, decodedResult: any) => void;
   onScanError: (errorMessage: string) => void;
   onScannerInit: (success: boolean) => void;
   isActive: boolean;
-  fps?: number;
-  qrbox?: number;
   preferredCamera?: string;
   fullView?: boolean;
 }
@@ -19,234 +17,68 @@ export default function QRScanner({
   onScanError,
   onScannerInit,
   isActive,
-  fps = 10,
-  qrbox,
   preferredCamera = 'environment',
   fullView = false,
 }: QRScannerProps) {
-  const qrRef = useRef<HTMLDivElement>(null);
-  const scanner = useRef<Html5Qrcode | null>(null);
-  const isCleaningUp = useRef(false);
-  const initializationAttempt = useRef(0);
-  const [isInitializing, setIsInitializing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  
-  // Generate a unique scannerId for this component instance
-  const scannerId = `qr-scanner-container-${useRef(Math.random().toString(36).substr(2, 9)).current}`;
-
-  const safeCleanup = useCallback(async () => {
-    if (scanner.current && !isCleaningUp.current) {
-      isCleaningUp.current = true;
-      
-      try {
-        const state = scanner.current.getState();
-        if (state === Html5QrcodeScannerState.SCANNING || 
-            state === Html5QrcodeScannerState.PAUSED) {
-          await scanner.current.stop();
-          // Wait longer after stopping to prevent transition errors
-          await new Promise(resolve => setTimeout(resolve, 500));
-        }
-      } catch (stopError) {
-        console.debug('Scanner stop error (expected if not running):', stopError);
-        // Even if stop fails, wait before proceeding
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-      
-      try {
-        if (scanner.current) {
-          scanner.current.clear();
-        }
-      } catch (clearError) {
-        console.debug('Scanner clear error:', clearError);
-      }
-      
-      scanner.current = null;
-      isCleaningUp.current = false;
-      console.log('QR Scanner cleaned up safely');
-    }
-  }, []);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scannerRef = useRef<QrScanner | null>(null);
 
   useEffect(() => {
-    if (!isActive || !qrRef.current || isInitializing || isCleaningUp.current) return;
+    if (!isActive || !containerRef.current) return;
 
-    const currentAttempt = ++initializationAttempt.current;
+    const videoElem = document.createElement('video');
+    videoElem.style.width = '100%';
+    videoElem.style.height = '100%';
+    videoRef.current = videoElem;
+    containerRef.current.appendChild(videoElem);
 
-    const initScanner = async () => {
-      // Check if this initialization attempt is still valid
-      if (currentAttempt !== initializationAttempt.current) {
-        console.log('Skipping outdated initialization attempt');
-        return;
+    const scanner = new QrScanner(
+      videoElem,
+      (result) => {
+        if (typeof result === 'string') {
+          onScanSuccess(result, null);
+        } else {
+          onScanSuccess(result.data, result);
+        }
+      },
+      {
+        onDecodeError: (error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          onScanError(message);
+        },
+        preferredCamera,
+        returnDetailedScanResult: true,
       }
+    );
+    scannerRef.current = scanner;
 
-      setIsInitializing(true);
-      setError(null);
-      
-      try {
-        // Clean up any existing scanner first
-        await safeCleanup();
-
-        // Wait for cleanup and DOM updates
-        await new Promise(resolve => setTimeout(resolve, 800));
-
-        // Verify we should still proceed
-        if (currentAttempt !== initializationAttempt.current || !isActive) {
-          return;
-        }
-
-        // Ensure the element exists and has the correct ID
-        if (!qrRef.current) {
-          throw new Error('QR scanner container not found');
-        }
-
-        // Set the ID on the element
-        qrRef.current.id = scannerId;
-
-        // Wait a bit more before creating new scanner
-        await new Promise(resolve => setTimeout(resolve, 200));
-
-        scanner.current = new Html5Qrcode(scannerId);
-
-        const config: Html5QrcodeCameraScanConfig = {
-          fps: Math.min(fps, 10), // Conservative FPS for stability
-          qrbox: qrbox ?? undefined,
-          aspectRatio: 1.0,
-          disableFlip: false,
-        };
-
-        // Define camera constraint options in order of preference
-        const cameraOptions = [
-          // Option 1: Any available camera (most compatible)
-          '',
-          // Option 2: User facing camera
-          'user',
-          // Option 3: Environment facing camera (if available)
-          'environment'
-        ];
-
-        let scannerStarted = false;
-        let lastError: Error | null = null;
-
-        for (let i = 0; i < cameraOptions.length; i++) {
-          // Check if we should still proceed
-          if (currentAttempt !== initializationAttempt.current || !isActive) {
-            return;
-          }
-
-          try {
-            console.log(`Trying camera option ${i + 1}:`, cameraOptions[i] || 'any camera');
-            
-            let cameraConstraint: string | MediaTrackConstraints = cameraOptions[i];
-            // If cameraConstraint is 'user' or 'environment', use facingMode, else use as cameraId (empty string for any camera)
-            if (cameraConstraint === 'user' || cameraConstraint === 'environment') {
-              cameraConstraint = { facingMode: cameraConstraint };
-            }
-            await scanner.current!.start(
-              cameraConstraint,
-              config,
-              (decodedText, decodedResult) => {
-                console.log('QR Code scanned:', decodedText);
-                onScanSuccess(decodedText, decodedResult);
-              },
-              (errorMessage) => {
-                // Only log decode errors occasionally to avoid spam
-                if (Math.random() < 0.01) {
-                  console.debug('QR decode error:', errorMessage);
-                }
-              }
-            );
-
-            scannerStarted = true;
-            console.log(`QR Scanner started successfully with option ${i + 1}`);
-            onScannerInit(true);
-            break;
-
-          } catch (cameraError) {
-            lastError = cameraError as Error;
-            console.warn(`Camera option ${i + 1} failed:`, cameraError);
-            
-            // Wait before trying next option to prevent transition errors
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // Check if the error is a transition error, if so, wait longer
-            if (cameraError instanceof Error && cameraError.message.includes('transition')) {
-              console.log('Waiting for scanner state to settle...');
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-          }
-        }
-
-        if (!scannerStarted) {
-          throw lastError || new Error('All camera options failed');
-        }
-
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to initialize QR scanner';
-        console.error('QR Scanner init error:', err);
-        
-        // Provide more specific error messages
-        let userFriendlyMessage = errorMessage;
-        if (errorMessage.includes('Permission') || errorMessage.includes('NotAllowedError')) {
-          userFriendlyMessage = 'Camera permission denied. Please allow camera access and refresh the page.';
-        } else if (errorMessage.includes('NotFoundError') || errorMessage.includes('Requested device not found')) {
-          userFriendlyMessage = 'No camera found. Please ensure your device has a camera and try refreshing the page.';
-        } else if (errorMessage.includes('NotSupportedError')) {
-          userFriendlyMessage = 'Camera not supported in this browser. Please try Chrome or Safari.';
-        } else if (errorMessage.includes('NotReadableError')) {
-          userFriendlyMessage = 'Camera is already in use by another application. Please close other camera apps and try again.';
-        }
-        
-        setError(userFriendlyMessage);
+    scanner
+      .start()
+      .then(() => onScannerInit(true))
+      .catch((err) => {
+        console.error('Failed to start QR scanner:', err);
         onScannerInit(false);
-        onScanError(userFriendlyMessage);
-      } finally {
-        // Only update state if this is still the current attempt
-        if (currentAttempt === initializationAttempt.current) {
-          setIsInitializing(false);
-        }
+        onScanError(err.message);
+      });
+
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop();
+        scannerRef.current.destroy();
+        scannerRef.current = null;
+      }
+
+      if (videoRef.current && containerRef.current?.contains(videoRef.current)) {
+        containerRef.current.removeChild(videoRef.current);
       }
     };
-
-    // Add a small delay before initializing to ensure DOM is ready
-    const timer = setTimeout(initScanner, 200);
-    
-    return () => {
-      clearTimeout(timer);
-      // Mark this attempt as outdated
-      if (currentAttempt === initializationAttempt.current) {
-        initializationAttempt.current++;
-      }
-    };
-  }, [isActive, fps, qrbox, preferredCamera, onScanSuccess, onScanError, onScannerInit, scannerId, safeCleanup]);
-
-  // Cleanup effect
-  useEffect(() => {
-    return () => {
-      safeCleanup();
-    };
-  }, [safeCleanup]);
+  }, [isActive, preferredCamera, onScanSuccess, onScanError, onScannerInit]);
 
   return (
     <div
-      ref={qrRef}
-      className={`relative ${fullView ? 'w-full h-full' : 'w-[300px] h-[300px]'} overflow-hidden rounded-lg bg-black`}
-    >
-      {isInitializing && (
-        <div className="absolute inset-0 flex items-center justify-center text-white z-10 bg-black bg-opacity-75">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
-            <p>Initializing camera...</p>
-          </div>
-        </div>
-      )}
-      
-      {error && !isInitializing && (
-        <div className="absolute inset-0 flex items-center justify-center text-white z-10 bg-red-900 bg-opacity-75">
-          <div className="text-center p-4">
-            <div className="text-red-200 mb-2">⚠️</div>
-            <p className="text-sm">{error}</p>
-          </div>
-        </div>
-      )}
-    </div>
+      ref={containerRef}
+      className={`relative ${fullView ? 'w-full h-full' : 'w-[300px] h-[300px]'} overflow-hidden`}
+    />
   );
 }
